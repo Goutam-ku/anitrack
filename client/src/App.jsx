@@ -474,7 +474,9 @@ function Clubs(){
     try{
       setLoading(true)
       setError('')
-      const {data}=await axios.get(`${API_BASE}/clubs`)
+      const { data } = await axios.get(`${API_BASE}/clubs`, {
+      params: { q: query }
+    });
       setItems(data.items||[])
     }catch(e){
       setError('Failed to load clubs')
