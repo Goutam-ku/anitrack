@@ -35,6 +35,27 @@ router.get('/:id/playlist',async(req,res)=>{
   res.json({items:sample})
 })
 
+// Details by id
+router.get('/:id',async(req,res,next)=>{
+  try{
+    const {id}=req.params
+    const {data}=await axios.get(`https://api.jikan.moe/v4/anime/${id}`,{timeout:15000})
+    const a=data?.data
+    if(!a) return res.status(404).json({error:'Not found'})
+    const item={
+      id:a.mal_id,
+      title:a.title,
+      synopsis:a.synopsis,
+      year:a.year,
+      type:(a.type||'Anime').toLowerCase(),
+      episodes:a.episodes||0,
+      rating:a.score||null,
+      poster:a.images?.jpg?.large_image_url||a.images?.jpg?.image_url
+    }
+    res.json({item})
+  }catch(err){next(err)}
+})
+
 export default router
 
 
