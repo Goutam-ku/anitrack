@@ -111,13 +111,13 @@ function Browse(){
                 </label>
                 <label className="text-xs text-slate-400">Year
                   <select value={filters.year} onChange={e=>setFilters(f=>({...f,year:e.target.value}))} className="mt-1 w-full bg-slate-800 border border-white/10 rounded px-2 h-9">
-                    {years.map(y=> <option key={y} value={y.toLowerCase?y.toLowerCase():y}>{y}</option>)}
+                    {years.map(y=> <option key={y} value={typeof y==='string'? y.toLowerCase(): y}>{y}</option>)}
                   </select>
                 </label>
               </div>
               <label className="block text-xs text-slate-400">Genre
                 <select value={filters.genre} onChange={e=>setFilters(f=>({...f,genre:e.target.value}))} className="mt-1 w-full bg-slate-800 border border-white/10 rounded px-2 h-9">
-                  {genres.map(g=> <option key={g} value={g.toLowerCase?g.toLowerCase():g}>{g}</option>)}
+                  {genres.map(g=> <option key={g} value={typeof g==='string'? g.toLowerCase(): g}>{g}</option>)}
                 </select>
               </label>
               <div className="flex justify-end gap-2 mt-3">
@@ -474,7 +474,7 @@ function Clubs(){
     try{
       setLoading(true)
       setError('')
-      const {data}=await axios.get(`${API_BASE}/clubs`,{params:{q:query||''}})
+      const {data}=await axios.get(`${API_BASE}/clubs`)
       setItems(data.items||[])
     }catch(e){
       setError('Failed to load clubs')
