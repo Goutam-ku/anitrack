@@ -2,268 +2,423 @@ import React from 'react'
 import { Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import Hls from 'hls.js'
+import SkeletonGrid from './components/skeletons/SkeletonGrid'
+import SkeletonDetails from './components/skeletons/SkeletonDetails'
+import SkeletonWatchlist from './components/skeletons/SkeletonWatchlist'
+import SkeletonClubs from './components/skeletons/SkeletonClubs'
+import SkeletonStats from './components/skeletons/SkeletonStats'
+import BackendStatusModal from './components/BackendStatusModal'
+import { ApiClient, getApiBase, getBackendStatus, apiEvents } from './services/apiClient'
+import { LocalStore } from './services/localStore'
 
-const API_BASE=import.meta.env.VITE_API_BASE||'http://localhost:4000/api'
+const AuthContext = React.createContext(null)
+function useAuth() { return React.useContext(AuthContext) }
 
-const AuthContext=React.createContext(null)
-function useAuth(){ return React.useContext(AuthContext) }
+function Layout({ children }) {
+  const [theme, setTheme] = React.useState(() => localStorage.getItem('theme') || 'dark')
+  const [backendStatus, setBackendStatus] = React.useState(getBackendStatus())
+  const [modalOpen, setModalOpen] = React.useState(false)
 
-function Layout({children}){
-  const [theme,setTheme]=React.useState(()=>localStorage.getItem('theme')||'dark')
-  React.useEffect(()=>{
-    const root=document.documentElement
-    if(theme==='dark'){root.classList.add('dark')}else{root.classList.remove('dark')}
-    localStorage.setItem('theme',theme)
-  },[theme])
+  React.useEffect(() => {
+    const handleStatus = (e) => setBackendStatus(e.detail.status)
+    apiEvents.addEventListener('status-change', handleStatus)
+    return () => apiEvents.removeEventListener('status-change', handleStatus)
+  }, [])
+
+  React.useEffect(() => {
+    const root = document.documentElement
+    if (theme === 'dark') {
+      root.classList.add('dark')
+      root.classList.remove('light')
+    } else {
+      root.classList.add('light')
+      root.classList.remove('dark')
+    }
+    localStorage.setItem('theme', theme)
+  }, [theme])
+
   return (
-    <div className="min-h-screen flex flex-col bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100">
-      <header className="sticky top-0 z-10 backdrop-blur bg-white/70 dark:bg-slate-900/70 border-b border-black/10 dark:border-white/10">
+    <div className="min-h-screen flex flex-col bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100 transition-colors">
+      <header className="sticky top-0 z-20 backdrop-blur bg-white/70 dark:bg-slate-900/70 border-b border-black/10 dark:border-white/10">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center gap-4">
-          <Link to="/" className="font-bold text-sky-400">AniTrack</Link>
-          <nav className="flex items-center gap-3 text-sm">
-            <Link to="/browse" className="hover:text-sky-300">Browse</Link>
-            <Link to="/watchlist" className="hover:text-sky-300">Watchlist</Link>
-            <Link to="/clubs" className="hover:text-sky-300">Clubs</Link>
+          <Link to="/" className="font-bold text-sky-400 text-lg flex items-center gap-1.5">
+            <span>▶</span> AniTrack
+          </Link>
+          <nav className="flex items-center gap-3 text-sm font-medium">
+            <Link to="/browse" className="hover:text-sky-400 transition-colors">Browse</Link>
+            <Link to="/watchlist" className="hover:text-sky-400 transition-colors">Watchlist</Link>
+            <Link to="/clubs" className="hover:text-sky-400 transition-colors">Clubs & Polls</Link>
           </nav>
-          <div className="ml-auto flex items-center gap-2">
-            <button onClick={()=>setTheme(t=>t==='dark'?'light':'dark')} className="px-3 py-1.5 rounded border border-black/10 dark:border-white/20 text-sm">{theme==='dark'? 'Light':'Dark'} mode</button>
+          <div className="ml-auto flex items-center gap-2.5">
+            {/* Status indicator pill */}
+            <button
+              onClick={() => setModalOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-black/10 dark:border-white/10 text-xs bg-slate-100 dark:bg-slate-800/80 hover:border-sky-500 transition-colors"
+              title="Click to check backend status"
+            >
+              <div className={`status-dot ${backendStatus === 'online' ? 'online' : 'local'}`} />
+              <span className="text-[11px] font-medium hidden sm:inline">
+                {backendStatus === 'online' ? 'API Online' : 'Local Mode'}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))}
+              className="px-3 py-1.5 rounded border border-black/10 dark:border-white/20 text-xs font-semibold hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+            >
+              {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
+            </button>
             <AuthButtons />
           </div>
         </div>
       </header>
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-6">{children}</main>
-      <footer className="border-t border-black/10 dark:border-white/10 py-6 text-sm text-slate-500 dark:text-slate-400 text-center">Data via Jikan API · Demo only</footer>
+      <footer className="border-t border-black/10 dark:border-white/10 py-6 text-sm text-slate-500 dark:text-slate-400 text-center">
+        AniTrack · Discover, Track & Stream Anime with Intelligent Resiliency
+      </footer>
+      <BackendStatusModal isOpen={modalOpen} onClose={() => setModalOpen(false)} />
     </div>
   )
 }
 
-function Browse(){
-  const [q,setQ]=React.useState('')
-  const [items,setItems]=React.useState([])
-  const [loading,setLoading]=React.useState(false)
-  const [error,setError]=React.useState('')
-  const [filters,setFilters]=React.useState({type:'all',genre:'all',year:'all'})
-  const [open,setOpen]=React.useState(false)
-  const auth=useAuth()
-  const [summary,setSummary]=React.useState({watching:0,completed:0,hours:0})
-  const fetchItems=async(query)=>{
+function Browse() {
+  const [q, setQ] = React.useState('')
+  const [items, setItems] = React.useState([])
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState('')
+  const [filters, setFilters] = React.useState({ type: 'all', genre: 'all', year: 'all' })
+  const [open, setOpen] = React.useState(false)
+  const auth = useAuth()
+  const [summary, setSummary] = React.useState({ watching: 0, completed: 0, hours: 0 })
+
+  const fetchItems = async (query) => {
     setLoading(true)
     setError('')
-    try{
-      const search=query?.trim()
-      const endpoint=search && search!=='top'
-        ? `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(search)}&limit=24`
-        : 'https://api.jikan.moe/v4/top/anime?limit=24'
-      const {data}=await axios.get(endpoint)
-      setItems((data.data||[]).map(anime=>({
-        id:anime.mal_id,
-        title:anime.title,
-        poster:anime.images?.jpg?.large_image_url||anime.images?.jpg?.image_url,
-        year:anime.year||anime.aired?.prop?.from?.year,
-        type:anime.type,
-        synopsis:anime.synopsis,
-        episodes:anime.episodes
-      })))
-    }catch{
+    try {
+      const data = await ApiClient.fetchAnimeList(query)
+      setItems(data || [])
+    } catch {
       setItems([])
       setError('Unable to load shows. Please try again in a moment.')
-    }finally{
+    } finally {
       setLoading(false)
     }
   }
-  React.useEffect(()=>{fetchItems('top')},[])
-  React.useEffect(()=>{
-    (async()=>{
-      if(!auth?.token){ setSummary({watching:0,completed:0,hours:0}); return }
-      try{
-        const {data}=await axios.get(`${API_BASE}/watchlist`,{headers:{Authorization:`Bearer ${auth.token}`}})
-        const items=data.items||[]
-        const watching=items.filter(i=>i.status==='watching').length
-        const completed=items.filter(i=>i.status==='completed').length
-        const hours=items.reduce((acc,i)=> acc + ((i.watchedEpisodes||0)*24/60), 0)
-        setSummary({watching,completed,hours:Math.round(hours)})
-      }catch{ setSummary({watching:0,completed:0,hours:0}) }
+
+  React.useEffect(() => { fetchItems('top') }, [])
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        let list = []
+        if (auth?.token) {
+          try {
+            const { data } = await axios.get(`${getApiBase()}/watchlist`, {
+              headers: { Authorization: `Bearer ${auth.token}` },
+              timeout: 3000
+            })
+            list = data.items || []
+          } catch {
+            list = LocalStore.getWatchlist()
+          }
+        } else {
+          list = LocalStore.getWatchlist()
+        }
+        const watching = list.filter(i => i.status === 'watching').length
+        const completed = list.filter(i => i.status === 'completed').length
+        const hours = list.reduce((acc, i) => acc + ((i.watchedEpisodes || 0) * 24 / 60), 0)
+        setSummary({ watching, completed, hours: Math.round(hours) })
+      } catch {
+        setSummary({ watching: 0, completed: 0, hours: 0 })
+      }
     })()
-  },[auth?.token])
-  const genres=React.useMemo(()=>{
-    const g=new Set(['All'])
-    items.forEach(i=>{
-      // Jikan results don't always include genres here; fallback none
-      if(i.synopsis){ /* no-op to keep structure */ }
-    })
-    // Derive genres from titles as placeholder not ideal; keep only All to avoid misleading options
-    return Array.from(g)
-  },[items])
-  const years=React.useMemo(()=>{
-    const y=new Set(['All'])
-    items.forEach(i=>{ if(i.year) y.add(String(i.year)) })
-    return Array.from(y).sort((a,b)=>Number(b)-Number(a))
-  },[items])
-  const filtered=React.useMemo(()=>{
-    return items.filter(i=>{
-      if(filters.type!=='all' && String(i.type).toLowerCase()!==filters.type) return false
-      if(filters.genre!=='all'){ /* no genre data reliably; skip filtering */ }
-      if(filters.year!=='all' && String(i.year)!==filters.year) return false
+  }, [auth?.token])
+
+  const years = React.useMemo(() => {
+    const y = new Set(['All'])
+    items.forEach(i => { if (i.year) y.add(String(i.year)) })
+    return Array.from(y).sort((a, b) => Number(b) - Number(a))
+  }, [items])
+
+  const filtered = React.useMemo(() => {
+    return items.filter(i => {
+      if (filters.type !== 'all' && String(i.type || '').toLowerCase() !== filters.type) return false
+      if (filters.year !== 'all' && String(i.year) !== filters.year) return false
       return true
     })
-  },[items,filters])
+  }, [items, filters])
+
   return (
     <div>
       <div className="flex items-center gap-2 mb-4">
-        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search anime..." className="flex-1 bg-slate-800 border border-white/10 rounded px-3 h-10"/>
-        <button onClick={()=>fetchItems(q)} className="px-4 rounded bg-sky-600 hover:bg-sky-500">Search</button>
+        <input
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') fetchItems(q) }}
+          placeholder="Search anime titles, genres..."
+          className="flex-1 bg-slate-100 dark:bg-slate-800 border border-black/10 dark:border-white/10 rounded px-3 h-10 text-sm focus:outline-none focus:border-sky-500"
+        />
+        <button onClick={() => fetchItems(q)} className="px-4 h-10 rounded bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold transition-colors">
+          Search
+        </button>
         <div className="ml-auto relative">
-          <button onClick={()=>setOpen(v=>!v)} className="px-3 h-10 rounded border border-white/20 text-sm">Filters</button>
+          <button onClick={() => setOpen(o => !o)} className="px-3 h-10 rounded border border-black/10 dark:border-white/20 text-sm font-semibold hover:bg-black/5 dark:hover:bg-white/5">
+            Filters
+          </button>
           {open && (
-            <div className="absolute right-0 mt-2 w-72 bg-slate-900/95 backdrop-blur border border-white/10 rounded p-3 shadow-xl z-20">
-              <div className="mb-2 text-sm font-semibold">Filter results</div>
-              <div className="grid grid-cols-2 gap-2 mb-2">
-                <label className="text-xs text-slate-400">Type
-                  <select value={filters.type} onChange={e=>setFilters(f=>({...f,type:e.target.value}))} className="mt-1 w-full bg-slate-800 border border-white/10 rounded px-2 h-9">
+            <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-slate-900/95 backdrop-blur border border-black/10 dark:border-white/10 rounded-lg p-3 shadow-2xl z-20 space-y-3">
+              <div className="text-sm font-semibold">Filter results</div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-xs text-slate-500 dark:text-slate-400">
+                  Type
+                  <select
+                    value={filters.type}
+                    onChange={e => setFilters(f => ({ ...f, type: e.target.value }))}
+                    className="mt-1 w-full bg-slate-100 dark:bg-slate-800 border border-black/10 dark:border-white/10 rounded px-2 h-9 text-xs"
+                  >
                     <option value="all">All</option>
                     <option value="tv">TV</option>
                     <option value="movie">Movie</option>
                     <option value="ova">OVA</option>
                     <option value="ona">ONA</option>
                     <option value="special">Special</option>
-                    <option value="music">Music</option>
                   </select>
                 </label>
-                <label className="text-xs text-slate-400">Year
-                  <select value={filters.year} onChange={e=>setFilters(f=>({...f,year:e.target.value}))} className="mt-1 w-full bg-slate-800 border border-white/10 rounded px-2 h-9">
-                    {years.map(y=> <option key={y} value={typeof y==='string'? y.toLowerCase(): y}>{y}</option>)}
+                <label className="text-xs text-slate-500 dark:text-slate-400">
+                  Year
+                  <select
+                    value={filters.year}
+                    onChange={e => setFilters(f => ({ ...f, year: e.target.value }))}
+                    className="mt-1 w-full bg-slate-100 dark:bg-slate-800 border border-black/10 dark:border-white/10 rounded px-2 h-9 text-xs"
+                  >
+                    {years.map(y => <option key={y} value={typeof y === 'string' ? y.toLowerCase() : y}>{y}</option>)}
                   </select>
                 </label>
               </div>
-              <label className="block text-xs text-slate-400">Genre
-                <select value={filters.genre} onChange={e=>setFilters(f=>({...f,genre:e.target.value}))} className="mt-1 w-full bg-slate-800 border border-white/10 rounded px-2 h-9">
-                  {genres.map(g=> <option key={g} value={typeof g==='string'? g.toLowerCase(): g}>{g}</option>)}
-                </select>
-              </label>
-              <div className="flex justify-end gap-2 mt-3">
-                <button onClick={()=>{setFilters({type:'all',genre:'all',year:'all'})}} className="px-3 h-9 rounded border border-white/20 text-sm">Clear</button>
-                <button onClick={()=>setOpen(false)} className="px-3 h-9 rounded bg-sky-600 hover:bg-sky-500 text-sm">Apply</button>
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={() => setFilters({ type: 'all', genre: 'all', year: 'all' })} className="px-3 h-8 rounded border border-white/20 text-xs">
+                  Clear
+                </button>
+                <button onClick={() => setOpen(false)} className="px-3 h-8 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold">
+                  Apply
+                </button>
               </div>
             </div>
           )}
         </div>
       </div>
-      <AnalyticsBar total={filtered.length} watching={summary.watching} completed={summary.completed} hours={summary.hours} />
-      {loading? <p>Loading...</p> : error ? <p className="text-rose-400">{error}</p> : (
+
+      {/* Stats Summary Bar */}
+      <SummaryBar total={filtered.length} watching={summary.watching} completed={summary.completed} hours={summary.hours} />
+
+      {/* Main Content with Skeleton Loading */}
+      {loading ? (
+        <SkeletonGrid count={12} />
+      ) : error ? (
+        <div className="text-center p-8 bg-slate-800/40 border border-white/10 rounded-lg">
+          <p className="text-rose-400 mb-3">{error}</p>
+          <button onClick={() => fetchItems('top')} className="px-4 py-2 rounded bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold">
+            Retry Loading
+          </button>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center p-12 bg-slate-800/40 border border-white/10 rounded-lg text-slate-400">
+          No anime found matching your search.
+        </div>
+      ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-          {filtered.map(it=> <Card key={it.id} item={it}/>) }
+          {filtered.map(item => <AnimeCard key={item.id} item={item} />)}
         </div>
       )}
     </div>
   )
 }
 
-function Card({item}){
+function AnimeCard({ item }) {
   return (
-    <Link to={`/title/${item.id}`} className="bg-slate-800/60 border border-white/10 rounded overflow-hidden hover:border-sky-500/50">
-      <div className="aspect-[3/4] bg-slate-900">
-        {item.poster && <img src={item.poster} alt={item.title} className="w-full h-full object-cover"/>}
+    <Link to={`/title/${item.id}`} className="bg-slate-100 dark:bg-slate-800/60 border border-black/10 dark:border-white/10 rounded-lg overflow-hidden hover:border-sky-500/50 hover:shadow-lg transition-all group flex flex-col">
+      <div className="aspect-[3/4] bg-slate-200 dark:bg-slate-900 relative overflow-hidden">
+        {item.poster ? (
+          <img src={item.poster} alt={item.title} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-xs text-slate-400">No Image</div>
+        )}
+        {item.rating && (
+          <div className="absolute top-2 right-2 bg-slate-900/80 backdrop-blur px-1.5 py-0.5 rounded text-[11px] font-bold text-amber-400 border border-white/10">
+            ★ {Number(item.rating).toFixed(1)}
+          </div>
+        )}
       </div>
-      <div className="p-2">
-        <div className="text-sm font-semibold line-clamp-2">{item.title}</div>
-        <div className="text-xs text-slate-400">{item.year||'—'} • {String(item.type).toUpperCase()}</div>
+      <div className="p-2.5 flex-1 flex flex-col justify-between">
+        <div className="text-sm font-semibold line-clamp-2 leading-tight mb-1 text-slate-900 dark:text-slate-100">{item.title}</div>
+        <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+          <span>{item.year || '—'}</span>
+          <span>•</span>
+          <span className="uppercase font-medium">{String(item.type || 'TV')}</span>
+        </div>
       </div>
     </Link>
   )
 }
 
-function AnalyticsBar({total,watching,completed,hours}){
+function SummaryBar({ total, watching, completed, hours }) {
   return (
     <div className="mb-4 grid grid-cols-2 sm:grid-cols-4 gap-2">
-      <Stat label="Total shows" value={total} />
-      <Stat label="Watching" value={watching} />
-      <Stat label="Completed" value={completed} />
-      <Stat label="Est. hours" value={hours} />
+      <SummaryItem label="Catalog shows" value={total} />
+      <SummaryItem label="Watching" value={watching} highlight="text-sky-400" />
+      <SummaryItem label="Completed" value={completed} highlight="text-emerald-400" />
+      <SummaryItem label="Est. hours" value={`${hours}h`} />
     </div>
   )
 }
 
-function Stat({label,value}){
+function SummaryItem({ label, value, highlight }) {
   return (
-    <div className="bg-slate-800/60 border border-white/10 rounded px-3 py-2">
-      <div className="text-xs text-slate-400">{label}</div>
-      <div className="text-lg font-semibold">{value}</div>
+    <div className="bg-slate-100 dark:bg-slate-800/60 border border-black/10 dark:border-white/10 rounded-lg px-3 py-2">
+      <div className="text-xs text-slate-500 dark:text-slate-400">{label}</div>
+      <div className={`text-lg font-bold ${highlight || 'text-slate-900 dark:text-slate-100'}`}>{value}</div>
     </div>
   )
 }
 
-function Title(){
-  const animeId=window.location.pathname.split('/').pop()
-  const [item,setItem]=React.useState(null)
-  const [eps,setEps]=React.useState([])
-  const [current,setCurrent]=React.useState(null)
-  const auth=useAuth()
-  React.useEffect(()=>{
-    (async()=>{
-      const {data}=await axios.get(`${API_BASE}/shows/${animeId}`)
-      setItem(data.item||null)
-      const pl=await axios.get(`${API_BASE}/shows/${animeId}/playlist`)
-      setEps(pl.data.items)
-      setCurrent(pl.data.items?.[0]||null)
+function TitleDetails() {
+  const id = window.location.pathname.split('/').pop()
+  const [show, setShow] = React.useState(null)
+  const [playlist, setPlaylist] = React.useState([])
+  const [currentEp, setCurrentEp] = React.useState(null)
+  const [loading, setLoading] = React.useState(true)
+  const [feedback, setFeedback] = React.useState('')
+  const auth = useAuth()
+
+  React.useEffect(() => {
+    (async () => {
+      setLoading(true)
+      try {
+        const [showData, playlistData] = await Promise.all([
+          ApiClient.fetchShowDetails(id),
+          ApiClient.fetchPlaylist(id)
+        ])
+        setShow(showData)
+        setPlaylist(playlistData)
+        if (playlistData?.length > 0) {
+          setCurrentEp(playlistData[0])
+        }
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setLoading(false)
+      }
     })()
-  },[animeId])
-  const addToWatchlist=async()=>{
-    if(!auth?.token){ return alert('Login to track progress') }
-    await axios.post(`${API_BASE}/watchlist`,{
-      showId:String(animeId),
-      title:item.title,
-      poster:item.poster,
-      status:'plan',
-      watchedEpisodes:0,
-      totalEpisodes:item.episodes||0,
-      type:item.type,
-      year:item.year
-    },{headers:{Authorization:`Bearer ${auth.token}`}})
+  }, [id])
+
+  const addToWatchlist = async () => {
+    if (!show) return
+    const entry = {
+      showId: String(id),
+      title: show.title,
+      poster: show.poster,
+      status: 'plan',
+      watchedEpisodes: 0,
+      totalEpisodes: show.episodes || 0,
+      type: show.type,
+      year: show.year
+    }
+
+    if (auth?.token) {
+      try {
+        await axios.post(`${getApiBase()}/watchlist`, entry, {
+          headers: { Authorization: `Bearer ${auth.token}` },
+          timeout: 3000
+        })
+      } catch {
+        LocalStore.saveWatchlistItem(entry)
+      }
+    } else {
+      LocalStore.saveWatchlistItem(entry)
+    }
+
+    setFeedback('Added to watchlist!')
+    setTimeout(() => setFeedback(''), 3000)
     window.dispatchEvent(new CustomEvent('watchlist:changed'))
   }
-  const incrementWatched=async()=>{
-    if(!auth?.token){ return alert('Login to track progress') }
-    // Fetch current watchlist item to know current count (lightweight approach: try to update optimistically)
-    try{
-      // Optimistic: request server to increment (PATCH with computed value would be better server-side; here we GET list and compute)
-      const {data}=await axios.get(`${API_BASE}/watchlist`,{headers:{Authorization:`Bearer ${auth.token}`}})
-      const existing=(data.items||[]).find(i=>String(i.showId)===String(animeId))
-      const total=item.episodes||0
-      const next=(existing?.watchedEpisodes||0)+1
-      const status = total>0 && next>=total ? 'completed' : 'watching'
-      await axios.post(`${API_BASE}/watchlist`,{
-        showId:String(animeId),
-        title:item.title,
-        poster:item.poster,
-        status,
-        watchedEpisodes: next>total && total>0 ? total : next,
-        totalEpisodes: total,
-        type:item.type,
-        year:item.year
-      },{headers:{Authorization:`Bearer ${auth.token}`}})
-      window.dispatchEvent(new CustomEvent('watchlist:changed'))
-    }catch(e){ console.error(e); alert('Failed to update progress') }
+
+  const addOneWatched = async () => {
+    if (!show) return
+    const list = LocalStore.getWatchlist()
+    const found = list.find(i => String(i.showId) === String(id))
+    const current = (found?.watchedEpisodes || 0) + 1
+    const total = show.episodes || 0
+    const status = total > 0 && current >= total ? 'completed' : 'watching'
+
+    const updated = {
+      showId: String(id),
+      title: show.title,
+      poster: show.poster,
+      status,
+      watchedEpisodes: total > 0 && current > total ? total : current,
+      totalEpisodes: total,
+      type: show.type,
+      year: show.year
+    }
+
+    if (auth?.token) {
+      try {
+        await axios.post(`${getApiBase()}/watchlist`, updated, {
+          headers: { Authorization: `Bearer ${auth.token}` },
+          timeout: 3000
+        })
+      } catch {
+        LocalStore.saveWatchlistItem(updated)
+      }
+    } else {
+      LocalStore.saveWatchlistItem(updated)
+    }
+
+    setFeedback(`Marked episode ${current} as watched!`)
+    setTimeout(() => setFeedback(''), 3000)
+    window.dispatchEvent(new CustomEvent('watchlist:changed'))
   }
-  if(!item) return <p>Loading...</p>
+
+  if (loading) {
+    return <SkeletonDetails />
+  }
+
+  if (!show) {
+    return <div className="text-center p-8">Anime title not found.</div>
+  }
+
   return (
     <div className="grid md:grid-cols-3 gap-6">
       <div>
-        {item.poster && <img src={item.poster} alt={item.title} className="w-full rounded border border-white/10"/>}
+        {show.poster && (
+          <img src={show.poster} alt={show.title} className="w-full rounded-lg border border-black/10 dark:border-white/10 shadow-xl" />
+        )}
       </div>
       <div className="md:col-span-2">
-        <h1 className="text-2xl font-bold mb-2">{item.title}</h1>
-        <p className="text-slate-300 mb-4 whitespace-pre-line">{item.synopsis||'No synopsis.'}</p>
-        <div className="flex gap-2 mb-3">
-          <button onClick={addToWatchlist} className="px-3 py-1.5 rounded border border-white/20 text-sm">Add to Watchlist</button>
-          <button onClick={incrementWatched} className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-sm">+1 Watched</button>
+        <h1 className="text-2xl font-bold mb-2">{show.title}</h1>
+        <p className="text-slate-600 dark:text-slate-300 mb-4 whitespace-pre-line text-sm leading-relaxed">{show.synopsis || 'No synopsis.'}</p>
+        <div className="flex items-center gap-2 mb-4">
+          <button onClick={addToWatchlist} className="px-3.5 py-1.5 rounded border border-black/10 dark:border-white/20 text-sm font-semibold hover:bg-white/5 transition-colors">
+            Add to Watchlist
+          </button>
+          <button onClick={addOneWatched} className="px-3.5 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold transition-colors">
+            +1 Watched
+          </button>
+          {feedback && <span className="text-xs text-emerald-400 font-medium ml-2">{feedback}</span>}
         </div>
-        {current && <PrimaryPlayer ep={current} />}
-        <h2 className="font-semibold mt-4 mb-2">Episode Playlist</h2>
+
+        {currentEp && <Player ep={currentEp} />}
+
+        <h2 className="font-semibold mt-6 mb-3 text-base">Episode Playlist</h2>
         <div className="grid sm:grid-cols-2 gap-3">
-          {eps.map(ep=> (
-            <button key={ep.id} onClick={()=>setCurrent(ep)} className={`text-left bg-slate-800/60 border rounded p-2 ${current?.id===ep.id?'border-sky-500':'border-white/10'}`}>
+          {playlist.map(ep => (
+            <button
+              key={ep.id}
+              onClick={() => setCurrentEp(ep)}
+              className={`text-left bg-slate-100 dark:bg-slate-800/60 border rounded-lg p-3 transition-colors ${currentEp?.id === ep.id ? 'border-sky-500 bg-sky-500/10' : 'border-black/10 dark:border-white/10 hover:border-sky-500/50'}`}
+            >
               <div className="font-semibold text-sm mb-1">{ep.title}</div>
-              <div className="text-xs text-slate-400">Click to play</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">{currentEp?.id === ep.id ? '▶ Now Playing' : 'Click to play'}</div>
             </button>
           ))}
         </div>
@@ -272,343 +427,386 @@ function Title(){
   )
 }
 
-function Episode({ep}){
-  const videoRef=React.useRef(null)
-  React.useEffect(()=>{
-    const video=videoRef.current
-    if(!video) return
-    if(Hls.isSupported()){
-      const hls=new Hls()
+function Player({ ep }) {
+  const ref = React.useRef(null)
+  React.useEffect(() => {
+    const video = ref.current
+    if (!video || !ep?.hls) return
+    if (Hls.isSupported()) {
+      const hls = new Hls()
       hls.loadSource(ep.hls)
       hls.attachMedia(video)
-      return ()=>hls.destroy()
-    }else{
-      video.src=ep.hls
+      video.play().catch(() => {})
+      return () => hls.destroy()
+    } else {
+      video.src = ep.hls
+      video.play().catch(() => {})
     }
-  },[ep.hls])
+  }, [ep?.hls])
+
   return (
-    <div className="bg-slate-800/60 border border-white/10 rounded p-2">
+    <div className="bg-slate-100 dark:bg-slate-800/60 border border-black/10 dark:border-white/10 rounded-lg p-3">
       <div className="font-semibold text-sm mb-2">{ep.title}</div>
-      <video ref={videoRef} controls className="w-full aspect-video rounded bg-black"/>
+      <video ref={ref} controls autoPlay className="w-full aspect-video rounded bg-black" />
     </div>
   )
 }
 
-function PrimaryPlayer({ep}){
-  const videoRef=React.useRef(null)
-  React.useEffect(()=>{
-    const video=videoRef.current
-    if(!video) return
-    if(Hls.isSupported()){
-      const hls=new Hls()
-      hls.loadSource(ep.hls)
-      hls.attachMedia(video)
-      video.play?.().catch(()=>{})
-      return ()=>hls.destroy()
-    }else{
-      video.src=ep.hls
-      video.play?.().catch(()=>{})
-    }
-  },[ep.hls])
-  return (
-    <div className="bg-slate-800/60 border border-white/10 rounded p-2">
-      <div className="font-semibold text-sm mb-2">{ep.title}</div>
-      <video ref={videoRef} controls autoPlay className="w-full aspect-video rounded bg-black"/>
-    </div>
-  )
-}
+function Watchlist() {
+  const auth = useAuth()
+  const [items, setItems] = React.useState([])
+  const [loading, setLoading] = React.useState(true)
+  const [filter, setFilter] = React.useState('all')
+  const [shareUrl, setShareUrl] = React.useState('')
+  const [shareMsg, setShareMsg] = React.useState('')
 
-function Login(){
-  const auth=useAuth()
-  const nav=useNavigate()
-  const [email,setEmail]=React.useState('')
-  const [password,setPassword]=React.useState('')
-  const [error,setError]=React.useState('')
-  const submit=async()=>{
-    try{
-      const {data}=await axios.post(`${API_BASE}/auth/login`,{email,password})
-      auth.login(data.token)
-      nav('/')
-    }catch(e){setError(e.response?.data?.error||'Login failed')}
-  }
-  return (
-    <div className="max-w-sm mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Login</h1>
-      {error && <div className="mb-2 text-rose-400 text-sm">{error}</div>}
-      <input className="w-full mb-2 bg-slate-800 border border-white/10 rounded px-3 h-10" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} />
-      <input className="w-full mb-4 bg-slate-800 border border-white/10 rounded px-3 h-10" placeholder="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
-      <button onClick={submit} className="w-full px-4 py-2 rounded bg-sky-600 hover:bg-sky-500">Sign in</button>
-    </div>
-  )
-}
-
-function Register(){
-  const nav=useNavigate()
-  const [email,setEmail]=React.useState('')
-  const [username,setUsername]=React.useState('')
-  const [password,setPassword]=React.useState('')
-  const [error,setError]=React.useState('')
-  const submit=async()=>{
-    try{
-      await axios.post(`${API_BASE}/auth/register`,{email,username,password})
-      nav('/login')
-    }catch(e){setError(e.response?.data?.error||'Register failed')}
-  }
-  return (
-    <div className="max-w-sm mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Create account</h1>
-      {error && <div className="mb-2 text-rose-400 text-sm">{error}</div>}
-      <input className="w-full mb-2 bg-slate-800 border border-white/10 rounded px-3 h-10" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} />
-      <input className="w-full mb-2 bg-slate-800 border border-white/10 rounded px-3 h-10" placeholder="Username" value={username} onChange={e=>setUsername(e.target.value)} />
-      <input className="w-full mb-4 bg-slate-800 border border-white/10 rounded px-3 h-10" placeholder="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
-      <button onClick={submit} className="w-full px-4 py-2 rounded bg-sky-600 hover:bg-sky-500">Sign up</button>
-    </div>
-  )
-}
-
-function AuthButtons(){
-  const auth=useAuth()
-  if(!auth?.token){
-    return (
-      <>
-        <Link to="/login" className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-sm">Login</Link>
-        <Link to="/register" className="px-3 py-1.5 rounded border border-white/20 text-sm">Register</Link>
-      </>
-    )
-  }
-  return (
-    <button onClick={auth.logout} className="px-3 py-1.5 rounded border border-white/20 text-sm">Logout</button>
-  )
-}
-
-function Watchlist(){
-  const auth=useAuth()
-  const [items,setItems]=React.useState([])
-  const [loading,setLoading]=React.useState(true)
-  const [status,setStatus]=React.useState('all')
-  const [shareUrl,setShareUrl]=React.useState('')
-  React.useEffect(()=>{
-    if(!auth?.token) return
-    (async()=>{
-      setLoading(true)
-      const {data}=await axios.get(`${API_BASE}/watchlist`,{headers:{Authorization:`Bearer ${auth.token}`}})
-      setItems(data.items||[])
+  const loadWatchlist = async () => {
+    setLoading(true)
+    try {
+      if (auth?.token) {
+        try {
+          const { data } = await axios.get(`${getApiBase()}/watchlist`, {
+            headers: { Authorization: `Bearer ${auth.token}` },
+            timeout: 3500
+          })
+          setItems(data.items || [])
+          setLoading(false)
+          return
+        } catch {}
+      }
+      setItems(LocalStore.getWatchlist())
+    } catch {
+      setItems([])
+    } finally {
       setLoading(false)
-    })()
-  },[auth?.token])
-  if(!auth?.token){return <Navigate to="/login"/>}
-  const filtered=items.filter(i=>status==='all'||i.status===status)
-  const createShare=async()=>{
-    const {data}=await axios.post(`${API_BASE}/share`,{visibility:'unlisted'},{headers:{Authorization:`Bearer ${auth.token}`}})
-    const url=`${window.location.origin}/share/${data.link.token}`
-    setShareUrl(url)
-    try{ await navigator.clipboard.writeText(url) }catch{}
-    alert('Share link copied to clipboard')
+    }
   }
-  const refresh=async()=>{
-    const {data}=await axios.get(`${API_BASE}/watchlist`,{headers:{Authorization:`Bearer ${auth.token}`}})
-    setItems(data.items||[])
+
+  React.useEffect(() => { loadWatchlist() }, [auth?.token])
+
+  const filtered = items.filter(i => (filter === 'all' ? true : i.status === filter))
+
+  const handleShare = async () => {
+    try {
+      let token = `share-${Date.now().toString(36)}`
+      if (auth?.token) {
+        try {
+          const { data } = await axios.post(`${getApiBase()}/share`, { visibility: 'unlisted' }, {
+            headers: { Authorization: `Bearer ${auth.token}` },
+            timeout: 3000
+          })
+          if (data.link?.token) token = data.link.token
+        } catch {}
+      }
+      const url = `${window.location.origin}/share/${token}`
+      setShareUrl(url)
+      try {
+        await navigator.clipboard.writeText(url)
+        setShareMsg('Share link copied to clipboard!')
+      } catch {
+        setShareMsg('Share link generated!')
+      }
+      setTimeout(() => setShareMsg(''), 4000)
+    } catch {}
   }
-  const updateProgress=async(showId,next,total)=>{
-    const status=(total>0 && next>=total)?'completed':(next>0?'watching':'plan')
-    await axios.patch(`${API_BASE}/watchlist/${showId}`,{watchedEpisodes:Math.max(0,Math.min(total,next)),status},{headers:{Authorization:`Bearer ${auth.token}`}})
-    await refresh()
+
+  const updateProgress = async (showId, count, total) => {
+    const validCount = Math.max(0, count)
+    const status = total > 0 && validCount >= total ? 'completed' : validCount > 0 ? 'watching' : 'plan'
+
+    if (auth?.token) {
+      try {
+        await axios.patch(`${getApiBase()}/watchlist/${showId}`, {
+          watchedEpisodes: validCount,
+          status
+        }, {
+          headers: { Authorization: `Bearer ${auth.token}` },
+          timeout: 3000
+        })
+      } catch {}
+    }
+    const updated = LocalStore.updateWatchlistItem(showId, { watchedEpisodes: validCount, status })
+    setItems([...updated])
   }
-  const increment=(it)=>updateProgress(it.showId,(it.watchedEpisodes||0)+1,(it.totalEpisodes||0))
-  const decrement=(it)=>updateProgress(it.showId,(it.watchedEpisodes||0)-1,(it.totalEpisodes||0))
-  const setExact=async(it)=>{
-    const total=it.totalEpisodes||0
-    const val=Number(prompt(`Enter watched episodes (0-${total})`, String(it.watchedEpisodes||0)))
-    if(Number.isFinite(val)) await updateProgress(it.showId,val,total)
+
+  const handleSetEpisodes = (item) => {
+    const total = item.totalEpisodes || 0
+    const current = item.watchedEpisodes || 0
+    const val = prompt(`Enter watched episodes for "${item.title}" (Total: ${total || 'Unknown'}):`, String(current))
+    if (val !== null) {
+      const num = parseInt(val, 10)
+      if (!isNaN(num)) updateProgress(item.showId, num, total)
+    }
   }
+
+  if (loading) {
+    return <SkeletonWatchlist />
+  }
+
   return (
     <div>
-      <div className="flex gap-2 mb-4 text-sm">
-        {['all','watching','completed','on_hold','dropped','plan'].map(s=> (
-          <button key={s} onClick={()=>setStatus(s)} className={`px-3 py-1.5 rounded border ${status===s? 'bg-sky-600 border-sky-500':'border-white/20'}`}>{s.replace('_',' ')}</button>
+      <div className="flex items-center gap-2 mb-4 text-sm flex-wrap">
+        {['all', 'watching', 'completed', 'on_hold', 'dropped', 'plan'].map(s => (
+          <button
+            key={s}
+            onClick={() => setFilter(s)}
+            className={`px-3 py-1.5 rounded-full border text-xs font-semibold capitalize transition-colors ${filter === s ? 'bg-sky-600 border-sky-500 text-white' : 'border-black/10 dark:border-white/20'}`}
+          >
+            {s.replace('_', ' ')}
+          </button>
         ))}
-        <div className="ml-auto"/>
-        <button onClick={createShare} className="px-3 py-1.5 rounded border border-white/20">Share watchlist</button>
+        <div className="ml-auto" />
+        <button onClick={handleShare} className="px-3 py-1.5 rounded border border-black/10 dark:border-white/20 text-xs font-semibold hover:bg-white/5">
+          Share Watchlist
+        </button>
       </div>
-      {loading? <p>Loading...</p> : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-          {filtered.map(it=> (
-            <div key={it.showId} className="bg-slate-800/60 border border-white/10 rounded overflow-hidden">
-              <div className="aspect-[3/4] bg-slate-900">{it.poster && <img src={it.poster} alt={it.title} className="w-full h-full object-cover"/>}</div>
-              <div className="p-2 text-sm">
-                <div className="font-semibold line-clamp-2">{it.title}</div>
-                <div className="text-xs text-slate-400 mb-2">{it.year||'—'} • {String(it.type).toUpperCase()}</div>
-                <div className="text-xs mb-2">{it.watchedEpisodes}/{it.totalEpisodes} eps · remaining {Math.max(0,(it.totalEpisodes||0)-(it.watchedEpisodes||0))}</div>
-                <div className="flex items-center gap-2">
-                  <button onClick={()=>decrement(it)} className="px-2 h-7 rounded border border-white/20">-</button>
-                  <button onClick={()=>increment(it)} className="px-2 h-7 rounded border border-white/20">+</button>
-                  <button onClick={()=>setExact(it)} className="px-2 h-7 rounded border border-white/20">Set</button>
-                </div>
-              </div>
-            </div>
-          ))}
+
+      {shareMsg && (
+        <div className="mb-3 text-xs p-2 rounded bg-sky-500/10 text-sky-400 font-medium">
+          {shareMsg}
         </div>
       )}
-      {shareUrl && <div className="mt-3 text-xs text-slate-400">Share URL: {shareUrl}</div>}
+
+      {filtered.length === 0 ? (
+        <div className="text-center p-12 bg-slate-800/40 border border-white/10 rounded-lg text-slate-400">
+          No anime in this section. <Link to="/browse" className="text-sky-400 underline ml-1">Browse shows</Link>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+          {filtered.map(i => {
+            const watched = i.watchedEpisodes || 0
+            const total = i.totalEpisodes || 0
+            return (
+              <div key={i.showId} className="bg-slate-100 dark:bg-slate-800/60 border border-black/10 dark:border-white/10 rounded-lg overflow-hidden flex flex-col justify-between">
+                <Link to={`/title/${i.showId}`} className="aspect-[3/4] bg-slate-200 dark:bg-slate-900 block overflow-hidden">
+                  {i.poster && <img src={i.poster} alt={i.title} className="w-full h-full object-cover" />}
+                </Link>
+                <div className="p-2.5 text-sm">
+                  <div className="font-semibold line-clamp-2 mb-1">{i.title}</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+                    {i.year || '—'} • {String(i.type || 'TV').toUpperCase()}
+                  </div>
+                  <div className="text-xs mb-3 font-medium">
+                    {watched}/{total || '?'} eps · remaining {Math.max(0, (total || 0) - watched)}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => updateProgress(i.showId, watched - 1, total)} className="px-2 h-7 rounded border border-white/20 text-xs font-bold hover:bg-white/5">
+                      -
+                    </button>
+                    <button onClick={() => updateProgress(i.showId, watched + 1, total)} className="px-2 h-7 rounded border border-white/20 text-xs font-bold hover:bg-white/5">
+                      +
+                    </button>
+                    <button onClick={() => handleSetEpisodes(i)} className="px-2.5 h-7 rounded border border-white/20 text-xs font-medium hover:bg-white/5">
+                      Set
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {shareUrl && (
+        <div className="mt-4 text-xs text-slate-400 p-2 bg-slate-800/40 rounded border border-white/10">
+          Share Link: <a href={shareUrl} target="_blank" rel="noreferrer" className="text-sky-400 underline">{shareUrl}</a>
+        </div>
+      )}
     </div>
   )
 }
 
-export default function App(){
-  const [token,setToken]=React.useState(()=>localStorage.getItem('token'))
-  const login=(t)=>{setToken(t);localStorage.setItem('token',t)}
-  const logout=()=>{setToken(null);localStorage.removeItem('token')}
-  const authValue={token,login,logout}
-  return (
-    <AuthContext.Provider value={authValue}>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Navigate to="/browse" />} />
-          <Route path="/browse" element={<Browse/>} />
-          <Route path="/title/:id" element={<Title/>} />
-          <Route path="/watchlist" element={<Watchlist/>} />
-          <Route path="/clubs" element={<Clubs/>} />
-          <Route path="/share/:token" element={<SharedWatchlist/>} />
-          <Route path="/login" element={<Login/>} />
-          <Route path="/register" element={<Register/>} />
-        </Routes>
-      </Layout>
-    </AuthContext.Provider>
-  )
-}
+function Clubs() {
+  const auth = useAuth()
+  const [clubs, setClubs] = React.useState([])
+  const [loading, setLoading] = React.useState(true)
+  const [q, setQ] = React.useState('')
+  const [name, setName] = React.useState('')
+  const [desc, setDesc] = React.useState('')
+  const [isPrivate, setIsPrivate] = React.useState(false)
+  const [activeClub, setActiveClub] = React.useState(null)
+  const [polls, setPolls] = React.useState([])
+  const [pollQ, setPollQ] = React.useState('')
+  const [options, setOptions] = React.useState(['', ''])
 
-function Clubs(){
-  const auth=useAuth()
-  const [items,setItems]=React.useState([])
-  const [loading,setLoading]=React.useState(true)
-  const [error,setError]=React.useState('')
-  const [q,setQ]=React.useState('')
-  const [name,setName]=React.useState('')
-  const [description,setDescription]=React.useState('')
-  const [isPrivate,setIsPrivate]=React.useState(false)
-  const [active,setActive]=React.useState(null)
-  const [polls,setPolls]=React.useState([])
-  const [question,setQuestion]=React.useState('')
-  const [options,setOptions]=React.useState(['',''])
-  const fetchClubs=async(query)=>{
-    try{
-      setLoading(true)
-      setError('')
-      const { data } = await axios.get(`${API_BASE}/clubs`, {
-      params: { q: query }
-    });
-      setItems(data.items||[])
-    }catch(e){
-      setError('Failed to load clubs')
-      setItems([])
-    }finally{
+  const loadClubs = async (query = '') => {
+    setLoading(true)
+    try {
+      if (auth?.token) {
+        try {
+          const { data } = await axios.get(`${getApiBase()}/clubs`, { params: { q: query }, timeout: 3500 })
+          setClubs(data.items || [])
+          if (data.items?.length > 0 && !activeClub) setActiveClub(data.items[0]._id)
+          setLoading(false)
+          return
+        } catch {}
+      }
+      const local = LocalStore.getClubs(query)
+      setClubs(local)
+      if (local?.length > 0 && !activeClub) setActiveClub(local[0]._id)
+    } catch {
+      setClubs([])
+    } finally {
       setLoading(false)
     }
   }
-  React.useEffect(()=>{fetchClubs('')},[])
-  React.useEffect(()=>{
-    if(!active) return setPolls([])
-    (async()=>{
-      try{
-        const {data}=await axios.get(`${API_BASE}/polls/club/${active}`)
-        setPolls(data.items||[])
-      }catch{ setPolls([]) }
-    })()
-  },[active])
-  const createClub=async(e)=>{
+
+  React.useEffect(() => { loadClubs('') }, [])
+
+  React.useEffect(() => {
+    if (!activeClub) return
+    const clubPolls = LocalStore.getPolls(activeClub)
+    setPolls(clubPolls)
+  }, [activeClub])
+
+  const createClub = async (e) => {
     e.preventDefault()
-    if(!auth?.token){return alert('Please login to create a club')}
-    const {data}=await axios.post(`${API_BASE}/clubs`,{name,description,isPrivate},{headers:{Authorization:`Bearer ${auth.token}`}})
-    setName('');setDescription('');setIsPrivate(false)
-    setItems([data.club,...items])
+    if (!name.trim()) return
+    const club = LocalStore.createClub({ name, description: desc, isPrivate })
+    setClubs(prev => [club, ...prev])
+    setActiveClub(club._id)
+    setName('')
+    setDesc('')
+    setIsPrivate(false)
   }
-  const addOption=()=> setOptions(o=>[...o,''])
-  const updateOption=(i,val)=> setOptions(o=>o.map((x,idx)=>idx===i?val:x))
-  const createPoll=async(e)=>{
+
+  const createPoll = async (e) => {
     e.preventDefault()
-    if(!auth?.token) return alert('Login to create polls')
-    const clean=options.map(s=>s.trim()).filter(Boolean)
-    if(!active||!question.trim()||clean.length<2) return alert('Add at least two options')
-    const {data}=await axios.post(`${API_BASE}/polls`,{clubId:active,question,options:clean},{headers:{Authorization:`Bearer ${auth.token}`}})
-    setPolls([data.poll,...polls])
-    setQuestion('');setOptions(['',''])
+    const valid = options.map(o => o.trim()).filter(Boolean)
+    if (!activeClub || !pollQ.trim() || valid.length < 2) return
+    const poll = LocalStore.createPoll({ clubId: activeClub, question: pollQ, options: valid })
+    if (poll) setPolls(prev => [poll, ...prev])
+    setPollQ('')
+    setOptions(['', ''])
   }
-  const vote=async(pollId,optionIndex)=>{
-    if(!auth?.token) return alert('Login to vote')
-    await axios.post(`${API_BASE}/polls/${pollId}/vote`,{optionIndex},{headers:{Authorization:`Bearer ${auth.token}`}})
-    const {data}=await axios.get(`${API_BASE}/polls/club/${active}`)
-    setPolls(data.items||[])
+
+  const votePoll = (pollId, idx) => {
+    const updated = LocalStore.votePoll(pollId, idx)
+    if (updated) setPolls(prev => prev.map(p => (p._id === pollId ? updated : p)))
   }
+
+  if (loading) {
+    return <SkeletonClubs />
+  }
+
   return (
     <div className="grid md:grid-cols-3 gap-6">
-      <div className="md:col-span-2">
-        <div className="flex gap-2 mb-4">
-          <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search clubs..." className="flex-1 bg-slate-800 border border-white/10 rounded px-3 h-10"/>
-          <button onClick={()=>fetchClubs(q)} className="px-4 rounded bg-sky-600 hover:bg-sky-500">Search</button>
+      <div className="md:col-span-2 space-y-4">
+        <div className="flex gap-2">
+          <input
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            placeholder="Search clubs..."
+            className="flex-1 bg-slate-100 dark:bg-slate-800 border border-black/10 dark:border-white/10 rounded px-3 h-10 text-sm"
+          />
+          <button onClick={() => loadClubs(q)} className="px-4 rounded bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold">
+            Search
+          </button>
         </div>
-        {loading? (
-          <p className="text-sm text-slate-400">Loading clubs...</p>
-        ) : (
-          <>
-            {error && <p className="text-sm text-rose-400 mb-2">{error}</p>}
+
+        <div className="grid gap-3">
+          {clubs.map(c => (
+            <button
+              key={c._id}
+              onClick={() => setActiveClub(c._id)}
+              className={`text-left bg-slate-100 dark:bg-slate-800/60 border rounded-lg p-3 transition-colors ${activeClub === c._id ? 'border-sky-500 bg-sky-500/10' : 'border-black/10 dark:border-white/10 hover:border-sky-500/50'}`}
+            >
+              <div className="font-semibold text-sm mb-1">{c.name}</div>
+              <div className="text-sm text-slate-600 dark:text-slate-300">{c.description || 'No description.'}</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                {c.isPrivate ? 'Private' : 'Public'} • Active discussions
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {activeClub && (
+          <div className="mt-6 pt-4 border-t border-white/10 space-y-3">
+            <div className="font-semibold text-base">Community Polls</div>
             <div className="grid gap-3">
-              {items.length===0 ? (
-                <div className="text-sm text-slate-400 border border-white/10 rounded p-3">No clubs yet. Create one on the right.</div>
-              ) : (
-                items.map(c=> (
-                  <button key={c._id} onClick={()=>setActive(c._id)} className={`text-left bg-slate-800/60 border rounded p-3 ${active===c._id?'border-sky-500':'border-white/10'}`}>
-                    <div className="font-semibold">{c.name}</div>
-                    <div className="text-sm text-slate-300">{c.description||'No description.'}</div>
-                    <div className="text-xs text-slate-400 mt-1">{c.isPrivate? 'Private':'Public'} • Created {new Date(c.createdAt).toLocaleDateString()}</div>
-                  </button>
-                ))
-              )}
-            </div>
-          </>
-        )}
-        {active && (
-          <div className="mt-6">
-            <div className="font-semibold mb-2">Polls</div>
-            <div className="grid gap-3">
-              {polls.map(p=> (
-                <div key={p._id} className="bg-slate-800/60 border border-white/10 rounded p-3">
-                  <div className="font-semibold mb-2">{p.question}</div>
-                  <div className="grid gap-2">
-                    {p.options.map((opt,idx)=> (
-                      <button key={idx} onClick={()=>vote(p._id,idx)} className="text-left bg-slate-900 border border-white/10 rounded px-3 py-2 hover:border-sky-500">
-                        <div className="flex items-center justify-between">
-                          <span>{opt.text}</span>
-                          <span className="text-xs text-slate-400">{opt.votes} votes</span>
-                        </div>
-                      </button>
-                    ))}
+              {polls.map(p => {
+                const total = p.options.reduce((acc, o) => acc + (o.votes || 0), 0)
+                return (
+                  <div key={p._id} className="bg-slate-100 dark:bg-slate-800/60 border border-black/10 dark:border-white/10 rounded-lg p-3.5 space-y-2">
+                    <div className="font-semibold text-sm">{p.question}</div>
+                    <div className="grid gap-2">
+                      {p.options.map((opt, idx) => {
+                        const pct = total > 0 ? Math.round((opt.votes / total) * 100) : 0
+                        return (
+                          <button
+                            key={idx}
+                            onClick={() => votePoll(p._id, idx)}
+                            className="relative overflow-hidden text-left bg-slate-200 dark:bg-slate-900 border border-white/10 rounded px-3 py-2 hover:border-sky-500 transition-colors"
+                          >
+                            <div className="absolute inset-y-0 left-0 bg-sky-500/20" style={{ width: `${pct}%` }} />
+                            <div className="relative flex items-center justify-between text-xs font-medium">
+                              <span>{opt.text}</span>
+                              <span className="text-slate-400">{opt.votes} votes ({pct}%)</span>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )}
       </div>
-      <div>
-        <form onSubmit={createClub} className="bg-slate-800/60 border border-white/10 rounded p-3">
-          <div className="font-semibold mb-2">Create a Club</div>
-          <input value={name} onChange={e=>setName(e.target.value)} placeholder="Club name" required className="w-full mb-2 bg-slate-800 border border-white/10 rounded px-3 h-10"/>
-          <textarea value={description} onChange={e=>setDescription(e.target.value)} placeholder="Description" className="w-full mb-2 bg-slate-800 border border-white/10 rounded px-3 py-2 h-24"></textarea>
-          <label className="text-sm flex items-center gap-2 mb-3"><input type="checkbox" checked={isPrivate} onChange={e=>setIsPrivate(e.target.checked)} /> Private club</label>
-          <button type="submit" className="w-full px-4 py-2 rounded bg-sky-600 hover:bg-sky-500">Create</button>
+
+      <div className="space-y-4">
+        <form onSubmit={createClub} className="bg-slate-100 dark:bg-slate-800/60 border border-black/10 dark:border-white/10 rounded-lg p-4 space-y-2.5">
+          <div className="font-semibold text-sm">Create a Club</div>
+          <input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="Club name"
+            required
+            className="w-full bg-white dark:bg-slate-800 border border-black/10 dark:border-white/10 rounded px-3 h-9 text-sm"
+          />
+          <textarea
+            value={desc}
+            onChange={e => setDesc(e.target.value)}
+            placeholder="Description..."
+            rows={3}
+            className="w-full bg-white dark:bg-slate-800 border border-black/10 dark:border-white/10 rounded px-3 py-2 text-sm"
+          />
+          <label className="text-xs flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={isPrivate} onChange={e => setIsPrivate(e.target.checked)} />
+            <span>Private Club</span>
+          </label>
+          <button type="submit" className="w-full py-2 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold transition-colors">
+            Create Club
+          </button>
         </form>
-        {active && (
-          <form onSubmit={createPoll} className="bg-slate-800/60 border border-white/10 rounded p-3 mt-4">
-            <div className="font-semibold mb-2">Create Poll</div>
-            <input value={question} onChange={e=>setQuestion(e.target.value)} placeholder="Question" required className="w-full mb-2 bg-slate-800 border border-white/10 rounded px-3 h-10"/>
-            <div className="grid gap-2 mb-2">
-              {options.map((v,i)=> (
-                <input key={i} value={v} onChange={e=>updateOption(i,e.target.value)} placeholder={`Option ${i+1}`} className="w-full bg-slate-800 border border-white/10 rounded px-3 h-10"/>
-              ))}
-            </div>
+
+        {activeClub && (
+          <form onSubmit={createPoll} className="bg-slate-100 dark:bg-slate-800/60 border border-black/10 dark:border-white/10 rounded-lg p-4 space-y-2.5">
+            <div className="font-semibold text-sm">Create Poll</div>
+            <input
+              value={pollQ}
+              onChange={e => setPollQ(e.target.value)}
+              placeholder="Question"
+              required
+              className="w-full bg-white dark:bg-slate-800 border border-black/10 dark:border-white/10 rounded px-3 h-9 text-sm"
+            />
+            {options.map((opt, idx) => (
+              <input
+                key={idx}
+                value={opt}
+                onChange={e => setOptions(opts => opts.map((v, i) => (i === idx ? e.target.value : v)))}
+                placeholder={`Option ${idx + 1}`}
+                className="w-full bg-white dark:bg-slate-800 border border-black/10 dark:border-white/10 rounded px-3 h-8 text-xs"
+              />
+            ))}
             <div className="flex gap-2">
-              <button type="button" onClick={addOption} className="px-3 py-1.5 rounded border border-white/20 text-sm">Add option</button>
-              <button type="submit" className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-sm">Create poll</button>
+              <button type="button" onClick={() => setOptions(o => [...o, ''])} className="px-2.5 py-1.5 rounded border border-white/20 text-xs font-semibold hover:bg-white/5">
+                + Option
+              </button>
+              <button type="submit" className="flex-1 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold">
+                Create Poll
+              </button>
             </div>
           </form>
         )}
@@ -617,39 +815,208 @@ function Clubs(){
   )
 }
 
-function SharedWatchlist(){
-  const token=window.location.pathname.split('/').pop()
-  const [items,setItems]=React.useState([])
-  const [loading,setLoading]=React.useState(true)
-  React.useEffect(()=>{
-    (async()=>{
-      try{
-        const {data}=await axios.get(`${API_BASE}/share/${token}`)
-        setItems(data.items||[])
-      }catch{ setItems([]) }
-      setLoading(false)
+function Shared() {
+  const token = window.location.pathname.split('/').pop()
+  const [items, setItems] = React.useState([])
+  const [loading, setLoading] = React.useState(true)
+
+  React.useEffect(() => {
+    (async () => {
+      setLoading(true)
+      try {
+        const { data } = await axios.get(`${getApiBase()}/share/${token}`, { timeout: 3500 })
+        setItems(data.items || [])
+      } catch {
+        setItems(LocalStore.getWatchlist())
+      } finally {
+        setLoading(false)
+      }
     })()
-  },[token])
+  }, [token])
+
+  if (loading) {
+    return <SkeletonWatchlist />
+  }
+
   return (
     <div>
       <h1 className="text-2xl font-bold mb-4">Shared Watchlist</h1>
-      {loading? <p>Loading...</p> : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-          {items.map(it=> (
-            <div key={it.showId} className="bg-slate-800/60 border border-white/10 rounded overflow-hidden">
-              <div className="aspect-[3/4] bg-slate-900">{it.poster && <img src={it.poster} alt={it.title} className="w-full h-full object-cover"/>}</div>
-              <div className="p-2 text-sm">
-                <div className="font-semibold line-clamp-2">{it.title}</div>
-                <div className="text-xs text-slate-400 mb-2">{it.year||'—'} • {String(it.type).toUpperCase()}</div>
-                <div className="text-xs">{it.watchedEpisodes}/{it.totalEpisodes} eps</div>
-              </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+        {items.map(i => (
+          <div key={i.showId} className="bg-slate-100 dark:bg-slate-800/60 border border-black/10 dark:border-white/10 rounded-lg overflow-hidden">
+            <div className="aspect-[3/4] bg-slate-200 dark:bg-slate-900">
+              {i.poster && <img src={i.poster} alt={i.title} className="w-full h-full object-cover" />}
             </div>
-          ))}
-        </div>
-      )}
+            <div className="p-2.5 text-sm">
+              <div className="font-semibold line-clamp-2 mb-1">{i.title}</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+                {i.year || '—'} • {String(i.type || 'TV').toUpperCase()}
+              </div>
+              <div className="text-xs font-medium">{i.watchedEpisodes}/{i.totalEpisodes} eps</div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
+function Login() {
+  const auth = useAuth()
+  const navigate = useNavigate()
+  const [email, setEmail] = React.useState('')
+  const [password, setPassword] = React.useState('')
+  const [err, setErr] = React.useState('')
 
+  const handleLogin = async (e) => {
+    e?.preventDefault?.()
+    try {
+      const { data } = await axios.post(`${getApiBase()}/auth/login`, { email, password }, { timeout: 3500 })
+      auth.login(data.token)
+      navigate('/')
+    } catch {
+      // Demo fallback login
+      auth.login(`local-token-${Date.now()}`)
+      navigate('/')
+    }
+  }
 
+  const handleDemo = () => {
+    auth.login(`demo-token-${Date.now()}`)
+    navigate('/')
+  }
+
+  return (
+    <div className="max-w-sm mx-auto p-6 bg-slate-100 dark:bg-slate-800/60 border border-black/10 dark:border-white/10 rounded-xl space-y-4">
+      <h1 className="text-xl font-bold">Login</h1>
+      {err && <div className="text-xs text-rose-400">{err}</div>}
+      <form onSubmit={handleLogin} className="space-y-3">
+        <input
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          placeholder="Email"
+          type="email"
+          required
+          className="w-full bg-white dark:bg-slate-800 border border-black/10 dark:border-white/10 rounded px-3 h-10 text-sm"
+        />
+        <input
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          placeholder="Password"
+          type="password"
+          required
+          className="w-full bg-white dark:bg-slate-800 border border-black/10 dark:border-white/10 rounded px-3 h-10 text-sm"
+        />
+        <button type="submit" className="w-full py-2.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold transition-colors">
+          Sign In
+        </button>
+      </form>
+      <button onClick={handleDemo} type="button" className="w-full py-2 rounded border border-white/20 text-xs font-semibold hover:bg-white/5">
+        ⚡ Demo Login (OtakuMaster)
+      </button>
+    </div>
+  )
+}
+
+function Register() {
+  const navigate = useNavigate()
+  const auth = useAuth()
+  const [email, setEmail] = React.useState('')
+  const [username, setUsername] = React.useState('')
+  const [password, setPassword] = React.useState('')
+  const [err, setErr] = React.useState('')
+
+  const handleReg = async (e) => {
+    e?.preventDefault?.()
+    try {
+      const { data } = await axios.post(`${getApiBase()}/auth/register`, { email, username, password }, { timeout: 3500 })
+      auth.login(data.token)
+      navigate('/')
+    } catch {
+      auth.login(`local-token-${Date.now()}`)
+      navigate('/')
+    }
+  }
+
+  return (
+    <div className="max-w-sm mx-auto p-6 bg-slate-100 dark:bg-slate-800/60 border border-black/10 dark:border-white/10 rounded-xl space-y-4">
+      <h1 className="text-xl font-bold">Create Account</h1>
+      {err && <div className="text-xs text-rose-400">{err}</div>}
+      <form onSubmit={handleReg} className="space-y-3">
+        <input
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          placeholder="Email"
+          type="email"
+          required
+          className="w-full bg-white dark:bg-slate-800 border border-black/10 dark:border-white/10 rounded px-3 h-10 text-sm"
+        />
+        <input
+          value={username}
+          onChange={e => setUsername(e.target.value)}
+          placeholder="Username"
+          required
+          className="w-full bg-white dark:bg-slate-800 border border-black/10 dark:border-white/10 rounded px-3 h-10 text-sm"
+        />
+        <input
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          placeholder="Password"
+          type="password"
+          required
+          className="w-full bg-white dark:bg-slate-800 border border-black/10 dark:border-white/10 rounded px-3 h-10 text-sm"
+        />
+        <button type="submit" className="w-full py-2.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold transition-colors">
+          Sign Up
+        </button>
+      </form>
+    </div>
+  )
+}
+
+function AuthButtons() {
+  const auth = useAuth()
+  if (auth?.token) {
+    return (
+      <button onClick={auth.logout} className="px-3 py-1.5 rounded border border-black/10 dark:border-white/20 text-xs font-semibold hover:bg-white/5">
+        Logout
+      </button>
+    )
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <Link to="/login" className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold">
+        Login
+      </Link>
+      <Link to="/register" className="px-3 py-1.5 rounded border border-black/10 dark:border-white/20 text-xs font-semibold hover:bg-white/5">
+        Register
+      </Link>
+    </div>
+  )
+}
+
+export default function App() {
+  const [token, setToken] = React.useState(() => localStorage.getItem('token'))
+  const authValue = React.useMemo(() => ({
+    token,
+    login: (t) => { setToken(t); localStorage.setItem('token', t) },
+    logout: () => { setToken(null); localStorage.removeItem('token') }
+  }), [token])
+
+  return (
+    <AuthContext.Provider value={authValue}>
+      <Layout>
+        <Routes>
+          <Route path="/" element={<Navigate to="/browse" replace />} />
+          <Route path="/browse" element={<Browse />} />
+          <Route path="/title/:id" element={<TitleDetails />} />
+          <Route path="/watchlist" element={<Watchlist />} />
+          <Route path="/clubs" element={<Clubs />} />
+          <Route path="/share/:token" element={<Shared />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+        </Routes>
+      </Layout>
+    </AuthContext.Provider>
+  )
+}
