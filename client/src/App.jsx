@@ -41,15 +41,35 @@ function Browse(){
   const [q,setQ]=React.useState('')
   const [items,setItems]=React.useState([])
   const [loading,setLoading]=React.useState(false)
+  const [error,setError]=React.useState('')
   const [filters,setFilters]=React.useState({type:'all',genre:'all',year:'all'})
   const [open,setOpen]=React.useState(false)
   const auth=useAuth()
   const [summary,setSummary]=React.useState({watching:0,completed:0,hours:0})
   const fetchItems=async(query)=>{
     setLoading(true)
-    const {data}=await axios.get(`${API_BASE}/shows`,{params:{q:query||'top'}})
-    setItems(data.items)
-    setLoading(false)
+    setError('')
+    try{
+      const search=query?.trim()
+      const endpoint=search && search!=='top'
+        ? `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(search)}&limit=24`
+        : 'https://api.jikan.moe/v4/top/anime?limit=24'
+      const {data}=await axios.get(endpoint)
+      setItems((data.data||[]).map(anime=>({
+        id:anime.mal_id,
+        title:anime.title,
+        poster:anime.images?.jpg?.large_image_url||anime.images?.jpg?.image_url,
+        year:anime.year||anime.aired?.prop?.from?.year,
+        type:anime.type,
+        synopsis:anime.synopsis,
+        episodes:anime.episodes
+      })))
+    }catch{
+      setItems([])
+      setError('Unable to load shows. Please try again in a moment.')
+    }finally{
+      setLoading(false)
+    }
   }
   React.useEffect(()=>{fetchItems('top')},[])
   React.useEffect(()=>{
@@ -129,7 +149,7 @@ function Browse(){
         </div>
       </div>
       <AnalyticsBar total={filtered.length} watching={summary.watching} completed={summary.completed} hours={summary.hours} />
-      {loading? <p>Loading...</p> : (
+      {loading? <p>Loading...</p> : error ? <p className="text-rose-400">{error}</p> : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
           {filtered.map(it=> <Card key={it.id} item={it}/>) }
         </div>
