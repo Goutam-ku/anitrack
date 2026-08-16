@@ -1,5 +1,5 @@
 import React from 'react'
-import { Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom'
+import { Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import axios from 'axios'
 import Hls from 'hls.js'
 import SkeletonGrid from './components/skeletons/SkeletonGrid'
@@ -18,6 +18,8 @@ function Layout({ children }) {
   const [theme, setTheme] = React.useState(() => localStorage.getItem('theme') || 'dark')
   const [backendStatus, setBackendStatus] = React.useState(getBackendStatus())
   const [modalOpen, setModalOpen] = React.useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false)
+  const location = useLocation()
 
   React.useEffect(() => {
     const handleStatus = (e) => setBackendStatus(e.detail.status)
@@ -37,19 +39,46 @@ function Layout({ children }) {
     localStorage.setItem('theme', theme)
   }, [theme])
 
+  // Automatically close mobile menu on route changes
+  React.useEffect(() => {
+    setMobileMenuOpen(false)
+  }, [location.pathname])
+
+  const isActive = (path) => location.pathname === path
+
   return (
     <div className="min-h-screen flex flex-col bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100 transition-colors">
-      <header className="sticky top-0 z-20 backdrop-blur bg-white/70 dark:bg-slate-900/70 border-b border-black/10 dark:border-white/10">
-        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center gap-4">
-          <Link to="/" className="font-bold text-sky-400 text-lg flex items-center gap-1.5">
+      <header className="sticky top-0 z-30 backdrop-blur bg-white/80 dark:bg-slate-900/80 border-b border-black/10 dark:border-white/10">
+        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+          {/* Brand Logo */}
+          <Link to="/" className="font-bold text-sky-400 text-lg flex items-center gap-1.5 shrink-0">
             <span>▶</span> AniTrack
           </Link>
-          <nav className="flex items-center gap-3 text-sm font-medium">
-            <Link to="/browse" className="hover:text-sky-400 transition-colors">Browse</Link>
-            <Link to="/watchlist" className="hover:text-sky-400 transition-colors">Watchlist</Link>
-            <Link to="/clubs" className="hover:text-sky-400 transition-colors">Clubs & Polls</Link>
+
+          {/* Desktop Navigation (Hidden on small screens) */}
+          <nav className="hidden md:flex items-center gap-4 text-sm font-medium">
+            <Link
+              to="/browse"
+              className={`transition-colors px-2 py-1 rounded ${isActive('/browse') ? 'text-sky-400 font-semibold' : 'hover:text-sky-400 text-slate-600 dark:text-slate-300'}`}
+            >
+              Browse
+            </Link>
+            <Link
+              to="/watchlist"
+              className={`transition-colors px-2 py-1 rounded ${isActive('/watchlist') ? 'text-sky-400 font-semibold' : 'hover:text-sky-400 text-slate-600 dark:text-slate-300'}`}
+            >
+              Watchlist
+            </Link>
+            <Link
+              to="/clubs"
+              className={`transition-colors px-2 py-1 rounded ${isActive('/clubs') ? 'text-sky-400 font-semibold' : 'hover:text-sky-400 text-slate-600 dark:text-slate-300'}`}
+            >
+              Clubs & Polls
+            </Link>
           </nav>
-          <div className="ml-auto flex items-center gap-2.5">
+
+          {/* Desktop Header Actions (Hidden on small screens) */}
+          <div className="hidden md:flex items-center gap-2.5">
             {/* Status indicator pill */}
             <button
               onClick={() => setModalOpen(true)}
@@ -57,7 +86,7 @@ function Layout({ children }) {
               title="Click to check backend status"
             >
               <div className={`status-dot ${backendStatus === 'online' ? 'online' : 'local'}`} />
-              <span className="text-[11px] font-medium hidden sm:inline">
+              <span className="text-[11px] font-medium">
                 {backendStatus === 'online' ? 'API Online' : 'Local Mode'}
               </span>
             </button>
@@ -70,7 +99,111 @@ function Layout({ children }) {
             </button>
             <AuthButtons />
           </div>
+
+          {/* Mobile Right Controls & Hamburger Button (Visible only on mobile/tablet) */}
+          <div className="flex md:hidden items-center gap-2">
+            {/* Quick Status Pill on mobile */}
+            <button
+              onClick={() => setModalOpen(true)}
+              className="p-1.5 rounded-full border border-black/10 dark:border-white/10 bg-slate-100 dark:bg-slate-800"
+              title="Backend Status"
+            >
+              <div className={`status-dot ${backendStatus === 'online' ? 'online' : 'local'}`} />
+            </button>
+
+            {/* Quick Theme Toggle */}
+            <button
+              onClick={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))}
+              className="p-1.5 rounded border border-black/10 dark:border-white/20 text-xs hover:bg-black/5 dark:hover:bg-white/5"
+              title="Toggle Theme"
+            >
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
+
+            {/* Hamburger Button */}
+            <button
+              onClick={() => setMobileMenuOpen(prev => !prev)}
+              className="p-2 rounded-lg border border-black/10 dark:border-white/20 text-slate-700 dark:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5 focus:outline-none transition-colors"
+              aria-label="Toggle mobile menu"
+              aria-expanded={mobileMenuOpen}
+            >
+              {mobileMenuOpen ? (
+                // Close 'X' Icon
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                // Hamburger 3-line Icon
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
+
+        {/* Mobile Navigation Drawer / Menu */}
+        {mobileMenuOpen && (
+          <div className="md:hidden border-t border-black/10 dark:border-white/10 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl px-4 py-4 animate-fadeInDown shadow-2xl space-y-4">
+            <nav className="flex flex-col space-y-1">
+              <Link
+                to="/browse"
+                onClick={() => setMobileMenuOpen(false)}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+                  isActive('/browse')
+                    ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
+                    : 'text-slate-700 dark:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'
+                }`}
+              >
+                <span>🔍</span>
+                <span>Browse & Search</span>
+              </Link>
+              <Link
+                to="/watchlist"
+                onClick={() => setMobileMenuOpen(false)}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+                  isActive('/watchlist')
+                    ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
+                    : 'text-slate-700 dark:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'
+                }`}
+              >
+                <span>📑</span>
+                <span>My Watchlist</span>
+              </Link>
+              <Link
+                to="/clubs"
+                onClick={() => setMobileMenuOpen(false)}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-colors ${
+                  isActive('/clubs')
+                    ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20'
+                    : 'text-slate-700 dark:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5'
+                }`}
+              >
+                <span>👥</span>
+                <span>Clubs & Polls</span>
+              </Link>
+            </nav>
+
+            <div className="pt-2 border-t border-black/10 dark:border-white/10 flex flex-col gap-2">
+              <button
+                onClick={() => { setModalOpen(true); setMobileMenuOpen(false); }}
+                className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 border border-black/5 dark:border-white/5 text-xs font-medium text-slate-700 dark:text-slate-300"
+              >
+                <span className="flex items-center gap-2">
+                  <div className={`status-dot ${backendStatus === 'online' ? 'online' : 'local'}`} />
+                  <span>Backend Status</span>
+                </span>
+                <span className="text-slate-500 dark:text-slate-400">
+                  {backendStatus === 'online' ? 'API Online' : 'Local Mode'} &rarr;
+                </span>
+              </button>
+
+              <div className="pt-1">
+                <AuthButtons onAction={() => setMobileMenuOpen(false)} isMobile />
+              </div>
+            </div>
+          </div>
+        )}
       </header>
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-6">{children}</main>
       <footer className="border-t border-black/10 dark:border-white/10 py-6 text-sm text-slate-500 dark:text-slate-400 text-center">
@@ -974,21 +1107,34 @@ function Register() {
   )
 }
 
-function AuthButtons() {
+function AuthButtons({ onAction, isMobile }) {
   const auth = useAuth()
   if (auth?.token) {
     return (
-      <button onClick={auth.logout} className="px-3 py-1.5 rounded border border-black/10 dark:border-white/20 text-xs font-semibold hover:bg-white/5">
-        Logout
-      </button>
+      <div className={isMobile ? 'flex flex-col gap-2' : 'flex items-center gap-2'}>
+        <button
+          onClick={() => { auth.logout(); onAction?.(); }}
+          className={`rounded border border-black/10 dark:border-white/20 text-xs font-semibold hover:bg-black/5 dark:hover:bg-white/5 transition-colors ${isMobile ? 'w-full py-2.5 text-center' : 'px-3 py-1.5'}`}
+        >
+          Logout
+        </button>
+      </div>
     )
   }
   return (
-    <div className="flex items-center gap-2">
-      <Link to="/login" className="px-3 py-1.5 rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold">
+    <div className={isMobile ? 'grid grid-cols-2 gap-2' : 'flex items-center gap-2'}>
+      <Link
+        to="/login"
+        onClick={() => onAction?.()}
+        className={`rounded bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold text-center transition-colors ${isMobile ? 'py-2.5' : 'px-3 py-1.5'}`}
+      >
         Login
       </Link>
-      <Link to="/register" className="px-3 py-1.5 rounded border border-black/10 dark:border-white/20 text-xs font-semibold hover:bg-white/5">
+      <Link
+        to="/register"
+        onClick={() => onAction?.()}
+        className={`rounded border border-black/10 dark:border-white/20 text-xs font-semibold text-center hover:bg-black/5 dark:hover:bg-white/5 transition-colors ${isMobile ? 'py-2.5' : 'px-3 py-1.5'}`}
+      >
         Register
       </Link>
     </div>
